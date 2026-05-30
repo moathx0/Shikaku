@@ -188,6 +188,7 @@ const DEFAULT_PLAYER = {
   expertWins:0, infiniteBest:0,
   hearts:5, lastHeartTime:0,   // ✅ نظام القلوب: 5 قلوب، يتجدّد قلب كل 20 دقيقة
   missionWeek:null, missions:null, missionProgress:{}, missionsClaimed:[],
+  rewardedLevels:{},   // ✅ يسجّل أي (مرحلة+صعوبة) أُعطيت مكافأتها — لمنع التكرار اللانهائي
 };
 let player = JSON.parse(JSON.stringify(DEFAULT_PLAYER));
 function savePlayer(){ try{ localStorage.setItem('shikaku_v4',JSON.stringify(player)); }catch(e){} }
@@ -395,6 +396,9 @@ let currentLevel=0, timerInterval=null, timeLeft=0, totalTime=0;
 let dragStart=null, isDragging=false;
 let completedRegions=[], cells=[], puzzle=null, selectedAvatar=null;
 let shieldActive=false, combo=0, comboMultiplier=1, timerPaused=false;
+// ✅ timerStarted: هل بدأ الوقت (لمَس اللاعب الشبكة)؟  levelWon: هل فاز بالمرحلة؟
+// خصم القلب عند الخروج يعتمد الآن على timerStarted (لا على وجود تحديد)
+let timerStarted=false, levelWon=false;
 let isDailyMode=false, isInfiniteMode=false, infiniteLevel=1;
 let currentMode='normal', maxComboReached=0, moveHistory=[];
 // ✅ عدد مرات التراجع المتبقية حسب الصعوبة: سهل=2، عادي=1، خبير=0
@@ -443,6 +447,7 @@ function startInfinite(n){
 function beginPuzzle(mode, isSpecial){
   completedRegions=[]; shieldActive=false; combo=0; comboMultiplier=1; maxComboReached=0; moveHistory=[];
   paidHeartThisSession = false; // ✅ تصفير عند بدء كل مرحلة جديدة
+  timerStarted=false; levelWon=false; // ✅ الوقت مُجمَّد حتى أول لمسة، ولم يُفز بعد
   // ✅ عدد التراجع حسب الصعوبة: سهل=2، عادي=1، خبير=0 (في اللانهائي/اليومي نعامله كعادي)
   const effMode=isSpecial?'normal':currentMode;
   undoLeft=effMode==='easy'?2:effMode==='expert'?0:1;
@@ -457,6 +462,7 @@ function beginPuzzle(mode, isSpecial){
   buildGrid(); renderProgress();
   const t=isSpecial?puzzle.time:Math.round(puzzle.time*mode.timeMul);
   startTimer(t);
+  showToast('المس الشبكة لبدء الوقت','info','👆'); // ✅ تنبيه أن الوقت مُجمَّد حتى أول لمسة
 }
 function updateItemCounts(){
   document.getElementById('hint-count').textContent='('+(player.inventory.hint||0)+')';
@@ -512,7 +518,7 @@ function getCellAt(x,y){
   return {r,c};
 }
 function getRect(a,b){ return {r1:Math.min(a.r,b.r),c1:Math.min(a.c,b.c),r2:Math.max(a.r,b.r),c2:Math.max(a.c,b.c)}; }
-function startDrag(e){ const cell=getCellAt(e.clientX,e.clientY); if(!cell)return; dragStart=cell; isDragging=true; updatePreview(cell); }
+function startDrag(e){ ensureTimerStarted(); const cell=getCellAt(e.clientX,e.clientY); if(!cell)return; dragStart=cell; isDragging=true; updatePreview(cell); }
 function moveDrag(e){ if(!isDragging||!dragStart)return; const cell=getCellAt(e.clientX,e.clientY); if(!cell)return; updatePreview(cell); }
 function endDrag(e){ if(!isDragging)return; isDragging=false; const cell=getCellAt(e.clientX,e.clientY); if(cell)tryPlace(cell); dragStart=null; clearPreview(); }
 function updatePreview(end){ clearPreview(); if(!dragStart)return; const rect=getRect(dragStart,end); const valid=isValidPlacement(rect); for(let r=rect.r1;r<=rect.r2;r++)for(let c=rect.c1;c<=rect.c2;c++){ cells[r][c].classList.add('preview'); if(!valid)cells[r][c].classList.add('invalid'); } }
@@ -661,8 +667,13 @@ function renderProgress(){
 
 // ═══════════ TIMER ═══════════
 function startTimer(s){
-  clearInterval(timerInterval); timerInterval=null; timeLeft=s; totalTime=s; timerPaused=false; updateTimerUI();
+  // ✅ يبدأ المؤقّت مُجمَّداً (timerPaused=true) حتى يلمس اللاعب الشبكة (ensureTimerStarted)
+  clearInterval(timerInterval); timerInterval=null; timeLeft=s; totalTime=s; timerPaused=true; updateTimerUI();
   timerInterval=setInterval(()=>{ if(timerPaused)return; timeLeft--; updateTimerUI(); if(timeLeft<=0){ clearInterval(timerInterval); timerInterval=null; handleTimeUp(); } },1000);
+}
+// ✅ تُستدعى عند أول لمسة على الشبكة: تُشغّل الوقت لأول مرة
+function ensureTimerStarted(){
+  if(!timerStarted && !levelWon){ timerStarted=true; timerPaused=false; }
 }
 function resumeTimer(){ timerPaused=false; }
 function updateTimerUI(){
@@ -692,39 +703,61 @@ function handleWin(shieldSave){
   const stars=shieldSave?1:(timeLeft>totalTime*0.5?3:timeLeft>totalTime*0.2?2:1);
   if(isDailyMode){ return handleDailyWin(elapsed,stars); }
   if(isInfiniteMode){ return handleInfiniteWin(elapsed,stars); }
+  levelWon=true; timerStarted=false; // ✅ فاز: الخروج للقائمة بعدها لا يخصم قلباً
 
   const mode=DIFF_MODES[currentMode]||DIFF_MODES.normal;
   const reward=getLevelReward(currentLevel);
-  const streakBonus=Math.min(player.streak*5,50);
-  const baseXP=Math.round(reward.xp*mode.xpMul);
-  const comboBonus=Math.round((comboMultiplier-1)*baseXP);
-  const totalXP=baseXP+streakBonus+comboBonus;
-  const totalCoins=Math.round(reward.coins*mode.coinMul)+Math.floor(player.streak/3)*5;
 
+  // ✅ مفتاح فريد لكل (مرحلة + مستوى صعوبة): "5_normal" ، "5_easy" ، "5_expert"
+  const rewardKey=currentLevel+'_'+currentMode;
+  if(!player.rewardedLevels) player.rewardedLevels={};   // حماية للحفظات القديمة
+  const firstClear=!player.rewardedLevels[rewardKey];    // هل هذه أول مرة على هذه الصعوبة؟
+
+  // المكافآت تُحسب فقط في أول مرة، وإلا تبقى أصفاراً
+  let streakBonus=0, baseXP=0, comboBonus=0, totalXP=0, totalCoins=0;
+  if(firstClear){
+    streakBonus=Math.min(player.streak*5,50);
+    baseXP=Math.round(reward.xp*mode.xpMul);
+    comboBonus=Math.round((comboMultiplier-1)*baseXP);
+    totalXP=baseXP+streakBonus+comboBonus;
+    totalCoins=Math.round(reward.coins*mode.coinMul)+Math.floor(player.streak/3)*5;
+  }
+
+  // ── تحديثات تحدث دائماً (سجلّ المهارة، ليس مكافأة قابلة للتكرار) ──
   if(!player.completedLevels.includes(currentLevel)) player.completedLevels.push(currentLevel);
-  player.coins+=totalCoins; player.totalCoinsEarned+=totalCoins; player.xp+=totalXP;
   const prev=player.stars[currentLevel]||0; player.stars[currentLevel]=Math.max(prev,stars);
   if(stars===3&&prev<3) player.perfectCount++;
   if(!player.bestTimes[currentLevel]||elapsed<player.bestTimes[currentLevel]) player.bestTimes[currentLevel]=elapsed;
-  player.streak++; player.maxStreak=Math.max(player.maxStreak,player.streak); player.totalPlayed++;
-  if(currentMode==='expert') player.expertWins=(player.expertWins||0)+1;
-  if(reward.item) player.inventory[reward.item.key]=(player.inventory[reward.item.key]||0)+1;
-  if(reward.avatarUnlock&&!player.unlockedAvatars.includes(reward.avatarUnlock)) player.unlockedAvatars.push(reward.avatarUnlock);
 
-  updateMissions({levelWin:1,stars,mode:currentMode,combo:maxComboReached});
+  // ── مكافآت لا تُمنح إلا أول مرة على هذه الصعوبة (تشمل السلسلة والمهام) ──
+  if(firstClear){
+    player.rewardedLevels[rewardKey]=true;   // علّم هذه (المرحلة+الصعوبة) كمُكافأة
+    player.coins+=totalCoins; player.totalCoinsEarned+=totalCoins; player.xp+=totalXP;
+    player.streak++; player.maxStreak=Math.max(player.maxStreak,player.streak); player.totalPlayed++;
+    if(currentMode==='expert') player.expertWins=(player.expertWins||0)+1;
+    if(reward.item) player.inventory[reward.item.key]=(player.inventory[reward.item.key]||0)+1;
+    if(reward.avatarUnlock&&!player.unlockedAvatars.includes(reward.avatarUnlock)) player.unlockedAvatars.push(reward.avatarUnlock);
+    updateMissions({levelWin:1,stars,mode:currentMode,combo:maxComboReached});
+  }
+
   const oldLv=player.level; player.level=calcLevel(); savePlayer();
 
   const icons=['🎉','🥳','🏆','✨','🎊'];
   document.getElementById('win-icon').textContent=shieldSave?'🛡️':icons[Math.floor(Math.random()*icons.length)];
   const nb=document.getElementById('win-next-btn'); nb.textContent='▶ المستوى التالي'; nb.style.display=currentLevel+1<PUZZLES.length?'':'none';
   const rd=document.getElementById('win-rewards'); rd.innerHTML='';
-  addRI(rd,'🪙','+'+totalCoins+' عملة',mode.id==='expert'?'×1.8':'');
-  addRI(rd,'⭐','+'+totalXP+' XP','');
-  if(streakBonus>0) addRI(rd,'🔥','مكافأة السلسلة','+'+streakBonus);
-  if(comboBonus>0)  addRI(rd,'🎯','مكافأة الكومبو','+'+comboBonus);
+  if(firstClear){
+    addRI(rd,'🪙','+'+totalCoins+' عملة',mode.id==='expert'?'×1.8':'');
+    addRI(rd,'⭐','+'+totalXP+' XP','');
+    if(streakBonus>0) addRI(rd,'🔥','مكافأة السلسلة','+'+streakBonus);
+    if(comboBonus>0)  addRI(rd,'🎯','مكافأة الكومبو','+'+comboBonus);
+  } else {
+    // إعادة لعب بنفس الصعوبة → لا مكافأة جديدة
+    addRI(rd,'✅','أكملتها مسبقاً بهذه الصعوبة','لا مكافأة');
+  }
   addRI(rd,'🏅','النجوم','★'.repeat(stars)+'☆'.repeat(3-stars));
-  if(reward.item) addRI(rd,reward.item.icon,reward.item.name+' مكتسب!','جديد');
-  if(reward.avatarUnlock) addRI(rd,reward.avatarUnlock,'صورة رمزية مفتوحة!','');
+  if(firstClear&&reward.item) addRI(rd,reward.item.icon,reward.item.name+' مكتسب!','جديد');
+  if(firstClear&&reward.avatarUnlock) addRI(rd,reward.avatarUnlock,'صورة رمزية مفتوحة!','');
   document.getElementById('win-sub').textContent=`${mode.icon} ${fmtTime(elapsed)} — ${stars===3?'مثالي! 🌟':stars===2?'ممتاز! 👏':'أحسنت! 👍'}`;
   openOverlay('win-overlay'); launchParticles();
   if(player.level>oldLv) setTimeout(()=>{ playSound('levelup'); showLevelUp(player.level,oldLv); },1400);
@@ -759,6 +792,7 @@ function showLevelUp(nLv,oLv){
 }
 function handleLose(keepHeart){
   player.streak=0;
+  timerStarted=false; // ✅ انتهت المحاولة: الخروج للقائمة بعدها لا يخصم قلباً إضافياً
   if(!keepHeart) loseHeart();   // ✅ مع الحماية لا ننقص قلباً
   savePlayer(); openOverlay('lose-overlay'); updateHeartsUI();
   // نُحدّث رسالة نافذة الخسارة حسب الحالة
@@ -779,12 +813,14 @@ function resetPuzzle(){
   const isSpecial=isInfiniteMode||isDailyMode;
   const effMode=isSpecial?'normal':currentMode;
   undoLeft=effMode==='easy'?2:effMode==='expert'?0:1;
-  // ✅ ينقص قلب عند إعادة تشغيل المرحلة (فقط في المراحل العادية)
-  if(!isSpecial){
+  // ✅ ينقص قلب فقط إن بدأ الوقت ولم يفز ولم يدفع مسبقاً (مراحل عادية)
+  if(!isSpecial && timerStarted && !levelWon && !paidHeartThisSession){
     loseHeart(); savePlayer(); updateHeartsUI();
     showToast('💔 خسرت قلباً بسبب إعادة المرحلة!','error','💔');
+    paidHeartThisSession=true;
   }
-  buildGrid(); renderProgress(); combo=0; comboMultiplier=1; updateComboUI(); updateUndoBtn(); playSound('click');
+  timerStarted=false; levelWon=false; // ✅ الوقت يُجمَّد حتى أول لمسة
+  buildGrid(); renderProgress(); combo=0; comboMultiplier=1; updateComboUI(); updateUndoBtn(); startTimer(totalTime); playSound('click');
 }
 // ═══════════ PAUSE MENU ═══════════
 // تتبع: هل دفع اللاعب قلباً بالإعادة في هذه الجلسة؟
@@ -793,13 +829,13 @@ let paidHeartThisSession = false;
 function openPauseMenu(){
   timerPaused = true;
   const isSpecial = isInfiniteMode || isDailyMode;
-  const hasProgress = moveHistory.length > 0;
+  const engaged = timerStarted && !levelWon; // ✅ بدأ الوقت ولم يفز = خروجه يكلّف قلباً
   // نص الـ sub حسب الحالة
   let sub = '';
   if(isSpecial){
     sub = 'اللعبة متوقفة مؤقتاً';
-  } else if(!hasProgress){
-    sub = 'لم تبدأ بعد — يمكنك الخروج بحرية';
+  } else if(!engaged){
+    sub = 'لم يبدأ الوقت بعد — يمكنك الخروج بحرية';
   } else if(paidHeartThisSession){
     sub = 'أعدت المرحلة مسبقاً — الخروج بدون خسارة إضافية';
   } else {
@@ -811,20 +847,20 @@ function openPauseMenu(){
   resetBtn.style.display = isSpecial ? 'none' : '';
   // نص زر الخروج حسب الحالة
   const quitBtn = document.getElementById('pause-quit-btn');
-  const willLose = !isSpecial && hasProgress && !paidHeartThisSession;
+  const willLose = engaged && !paidHeartThisSession;
   quitBtn.textContent = willLose ? '🚪 الخروج 💔' : '🚪 الخروج';
   openOverlay('pause-overlay');
 }
 
 function closePauseMenu(){
   closeOverlay('pause-overlay');
-  resumeTimer();
+  if(timerStarted && !levelWon) resumeTimer(); // ✅ لا نُشغّل الوقت إن لم يكن بدأ أصلاً
 }
 
 function pauseDoReset(){
   closeOverlay('pause-overlay');
-  // ✅ ينقص قلب فقط إن كان في تحديد ولم يدفع مسبقاً
-  if(moveHistory.length > 0 && !paidHeartThisSession){
+  // ✅ ينقص قلب فقط إن: بدأ الوقت + لم يدفع مسبقاً
+  if(timerStarted && !levelWon && !paidHeartThisSession){
     loseHeart(); savePlayer(); updateHeartsUI();
     showToast('💔 خسرت قلباً بسبب إعادة المرحلة!','error','💔');
     paidHeartThisSession = true;
@@ -834,15 +870,15 @@ function pauseDoReset(){
   const isSpecial=isInfiniteMode||isDailyMode;
   const effMode=isSpecial?'normal':currentMode;
   undoLeft=effMode==='easy'?2:effMode==='expert'?0:1;
-  buildGrid(); renderProgress(); combo=0; comboMultiplier=1; updateComboUI(); updateUndoBtn(); playSound('click');
+  timerStarted=false; levelWon=false; // ✅ الوقت يُجمَّد من جديد حتى أول لمسة
+  buildGrid(); renderProgress(); combo=0; comboMultiplier=1; updateComboUI(); updateUndoBtn(); startTimer(totalTime); playSound('click');
 }
 
 function pauseDoQuit(){
   closeOverlay('pause-overlay');
   const isSpecial = isInfiniteMode || isDailyMode;
-  const hasProgress = moveHistory.length > 0;
-  // ✅ ينقص قلب فقط إن: مراحل عادية + في تحديد + لم يدفع مسبقاً
-  if(!isSpecial && hasProgress && !paidHeartThisSession){
+  // ✅ ينقص قلب فقط إن: مراحل عادية + بدأ الوقت + لم يفز + لم يدفع مسبقاً
+  if(!isSpecial && timerStarted && !levelWon && !paidHeartThisSession){
     loseHeart(); savePlayer(); updateHeartsUI();
     showToast('💔 خسرت قلباً بسبب الخروج!','error','💔');
   }
