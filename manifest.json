@@ -1,4 +1,15 @@
-"icons": [
+{
+  "name": "شيكاكو | لعبة المربعات",
+  "short_name": "شيكاكو",
+  "description": "لعبة مربعات يابانية ذكية — حل الألغاز بتقسيم الشبكة إلى مستطيلات",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#0d0d12",
+  "theme_color": "#c8ff57",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
     {
       "src": "icons/icon-192.png",
       "sizes": "192x192",
@@ -11,3 +22,5 @@
     }
   ],
   "screenshots": [],
+  "categories": ["games", "puzzle"]
+}
