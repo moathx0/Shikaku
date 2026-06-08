@@ -30,7 +30,7 @@ function getLevelReward(idx){
   return { coins, xp, item, avatarUnlock:AV[idx]||null };
 }
 
-// ═══════════ PUZZLES (75, all verified solvable) ═══════════
+// ═══════════ PUZZLES (100, all verified solvable) ═══════════
 const PUZZLES = [
   { name:'البداية', rows:3, cols:3, time:60, numbers:[{r:1,c:1,val:9}] },
   { name:'أولى الخطوات', rows:3, cols:3, time:66, numbers:[{r:0,c:0,val:4},{r:0,c:2,val:3},{r:2,c:0,val:2}] },
@@ -800,11 +800,33 @@ function handleLose(keepHeart){
   if(sub) sub.textContent=keepHeart?'🛡️ الحماية حفظت قلبك — لم ينقص أي قلب':'السلسلة انكسرت — حاول مجدداً!';
 }
 
+// ═══════════ عدّاد الإعلان البيني ═══════════
+// نُظهر الإعلان كل 3 مراحل فقط (وليس بعد كل مرحلة)
+// AD_FREQUENCY = 3 → إعلان بعد كل 3 مراحل مكتملة
+const AD_FREQUENCY = 3;
+let levelsSinceLastAd = 0; // عدّاد المراحل المكتملة منذ آخر إعلان
+
 function nextLevel(){
   closeOverlay('win-overlay');
+  // اليومي يخرج للقائمة الرئيسية بلا إعلان بيني
   if(isDailyMode){ showScreen('home-screen'); return; }
-  if(isInfiniteMode){ startInfinite(infiniteLevel+1); return; }
-  const nx=currentLevel+1; if(nx<PUZZLES.length) startLevel(nx); else showScreen('levels-screen');
+
+  // دالة الانتقال للمرحلة/اللغز التالي
+  const goNext = ()=>{
+    if(isInfiniteMode){ startInfinite(infiniteLevel+1); return; }
+    const nx=currentLevel+1;
+    if(nx<PUZZLES.length) startLevel(nx);
+    else showScreen('levels-screen');
+  };
+
+  // ✅ زِد العدّاد، وأظهر الإعلان فقط عند الوصول للحد
+  levelsSinceLastAd++;
+  if(levelsSinceLastAd >= AD_FREQUENCY){
+    levelsSinceLastAd = 0;       // أعد التصفير
+    showInterstitialAd(goNext);  // أظهر الإعلان ثم انتقل
+  } else {
+    goNext();                    // انتقل مباشرة بلا إعلان
+  }
 }
 function retryLevel(){ if(!hasHeart()){ closeOverlay('lose-overlay'); showHeartsEmpty(); return; } closeOverlay('lose-overlay'); if(isInfiniteMode) startInfinite(infiniteLevel); else if(isDailyMode) startDaily(); else startLevel(currentLevel); }
 function resetPuzzle(){
@@ -1007,6 +1029,87 @@ function claimAdReward(){
 }
 // إغلاق الإعلان قبل اكتماله (لا مكافأة)
 function cancelAd(){ clearInterval(adTimer); closeOverlay('ad-overlay'); }
+
+// ═══════════ INTERSTITIAL AD (إعلان بيني بعد كل مرحلة) ═══════════
+// يظهر تلقائياً عند الانتقال للمرحلة التالية:
+//   • أول 5 ثوانٍ إجبارية (لا زر تخطي)
+//   • بعدها يظهر زر "تخطي" (بدون مكافأة)
+//   • إذا أكمل 30 ثانية → يأخذ +20 عملة كمكافأة على المشاهدة
+let interTimerFull=null, interTimerSkip=null, interCallback=null;
+
+function showInterstitialAd(onDone){
+  // نحفظ الدالة التي ستُستدعى بعد إغلاق الإعلان (للانتقال للمرحلة التالية)
+  interCallback = (typeof onDone === 'function') ? onDone : null;
+  let skipSecs = 5;    // عدّاد التخطي
+  let fullSecs = 30;   // عدّاد المشاهدة الكاملة
+
+  const countEl  = document.getElementById('inter-count');
+  const skipBtn  = document.getElementById('inter-skip-btn');
+  const skipNum  = document.getElementById('inter-skip-num');
+  const skipHint = document.getElementById('inter-skip-hint');
+  const claimBtn = document.getElementById('inter-claim-btn');
+
+  // إعادة ضبط الواجهة قبل الفتح
+  countEl.textContent     = fullSecs;
+  skipNum.textContent     = skipSecs;
+  skipBtn.style.display   = 'none';   // زر التخطي مخفي حتى انتهاء عدّاد 5ث
+  claimBtn.style.display  = 'none';   // زر الاستلام مخفي حتى اكتمال 30ث
+  skipHint.style.display  = '';       // عداد نصي "يمكن التخطي بعد X ثوانٍ"
+
+  openOverlay('interstitial-overlay');
+
+  // عدّاد التخطي (5 ثوانٍ): بعدها يظهر زر "تخطي" ويختفي العدّاد النصي
+  clearInterval(interTimerSkip);
+  interTimerSkip = setInterval(()=>{
+    skipSecs--;
+    if(skipSecs<=0){
+      clearInterval(interTimerSkip); interTimerSkip=null;
+      skipBtn.style.display  = '';      // أظهر زر التخطي
+      skipHint.style.display = 'none';  // أخفِ النص التحذيري
+    } else {
+      skipNum.textContent = skipSecs;
+    }
+  }, 1000);
+
+  // عدّاد المشاهدة الكاملة (30 ثانية): بعدها زر "استلم المكافأة"
+  clearInterval(interTimerFull);
+  interTimerFull = setInterval(()=>{
+    fullSecs--;
+    countEl.textContent = fullSecs;
+    if(fullSecs<=0){
+      clearInterval(interTimerFull); interTimerFull=null;
+      countEl.textContent     = '✓';
+      skipBtn.style.display   = 'none';
+      skipHint.style.display  = 'none';
+      claimBtn.style.display  = '';   // أظهر زر استلام المكافأة
+    }
+  }, 1000);
+}
+
+// تنظيف المؤقتات وإغلاق نافذة الإعلان البيني
+function _cleanupInterstitial(){
+  clearInterval(interTimerSkip); interTimerSkip=null;
+  clearInterval(interTimerFull); interTimerFull=null;
+  closeOverlay('interstitial-overlay');
+}
+
+// تخطي الإعلان (بدون مكافأة) — الزر يظهر فقط بعد مرور 5 ثوانٍ
+function skipInterstitial(){
+  _cleanupInterstitial();
+  const cb = interCallback; interCallback = null;
+  if(cb) cb();   // ننتقل للمرحلة التالية
+}
+
+// استلام مكافأة المشاهدة الكاملة (+20 عملة)
+function claimInterstitialReward(){
+  player.coins += 20; player.totalCoinsEarned += 20;
+  savePlayer();
+  showToast('🪙 +20 عملة على المشاهدة!','gold','🪙');
+  playSound('coin');
+  _cleanupInterstitial();
+  const cb = interCallback; interCallback = null;
+  if(cb) cb();   // ننتقل للمرحلة التالية
+}
 
 // ═══════════ نافذة نفاد القلوب ═══════════
 function showHeartsEmpty(){
