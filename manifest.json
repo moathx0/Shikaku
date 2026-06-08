@@ -1,7 +1,7 @@
 {
-  "name": "شيكاكو | لعبة المربعات",
+  "name": "شيكاكو - لعبة الألغاز",
   "short_name": "شيكاكو",
-  "description": "لعبة مربعات يابانية ذكية — حل الألغاز بتقسيم الشبكة إلى مستطيلات",
+  "description": "لعبة ألغاز يابانية ذكية — حل الألغاز بتقسيم الشبكة إلى مستطيلات منطقية",
   "start_url": "./index.html",
   "display": "fullscreen",
   "orientation": "portrait",
@@ -13,12 +13,20 @@
     {
       "src": "icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "screenshots": [],
