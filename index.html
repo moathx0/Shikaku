@@ -335,6 +335,27 @@
   </div>
 </div>
 
+<!-- 📺 الإعلان البيني — يظهر تلقائياً بعد كل مرحلة (إجباري لـ 5 ثوانٍ، ثم زر تخطي) -->
+<div class="overlay" id="interstitial-overlay">
+  <div class="modal">
+    <div class="modal-icon">📺</div>
+    <div class="modal-title">إعلان قصير</div>
+    <div class="ad-screen">
+      <div class="ad-fake-label">إعلان</div>
+      <div class="ad-counter" id="inter-count">30</div>
+      <div class="ad-hint">شاهد كاملاً لتربح +20 عملة 🪙</div>
+    </div>
+    <div class="modal-buttons">
+      <!-- زر استلام المكافأة (يظهر بعد إكمال 30ث) -->
+      <button class="btn-primary full" id="inter-claim-btn" style="display:none" onclick="claimInterstitialReward()">🎁 استلم +20 عملة</button>
+      <!-- زر التخطي (يظهر بعد 5 ثوانٍ) -->
+      <button class="btn-secondary full" id="inter-skip-btn" style="display:none" onclick="skipInterstitial()">⏭️ تخطي الإعلان</button>
+    </div>
+    <!-- العدّاد النصي قبل ظهور زر التخطي -->
+    <div class="ad-hint" id="inter-skip-hint">يمكن التخطي بعد <span id="inter-skip-num">5</span> ثوانٍ</div>
+  </div>
+</div>
+
 <!-- ❤️ نافذة نفاد القلوب -->
 <div class="overlay" id="hearts-overlay">
   <div class="modal">
